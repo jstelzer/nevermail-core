@@ -64,7 +64,19 @@ If a consumer needs more melib types, add them to the re-export list rather than
 
 ## Critical: Version Pinning
 
-melib 0.8.13 depends on `imap-codec` and `imap-types`. The workspace lockfile pins these to `2.0.0-alpha.4`. Newer alpha versions have breaking changes. See the root `CLAUDE.md` for details.
+melib 0.8.13's `imap` feature depends on `imap-codec` and `imap-types`. Newer alpha versions introduced a breaking change (missing `modifiers` field) that prevents compilation.
+
+**The lockfile pins these to working versions:**
+- `imap-codec = 2.0.0-alpha.4`
+- `imap-types = 2.0.0-alpha.4`
+
+**DO NOT run `cargo update` without verifying these pins are preserved.** If they drift, re-pin with:
+```bash
+cargo update -p imap-codec --precise 2.0.0-alpha.4
+cargo update -p imap-types --precise 2.0.0-alpha.4
+```
+
+This is an upstream melib bug. Monitor melib releases for a fix. Any consumer with its own lockfile (nevermail, nevermail-tui) must also maintain these pins.
 
 ## Dependencies
 

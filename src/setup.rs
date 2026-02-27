@@ -23,6 +23,11 @@ pub enum FieldId {
     Password,
     Email,
     Starttls,
+    SmtpServer,
+    SmtpPort,
+    SmtpUsername,
+    SmtpPassword,
+    SmtpStarttls,
 }
 
 impl FieldId {
@@ -35,6 +40,11 @@ impl FieldId {
         Self::Password,
         Self::Email,
         Self::Starttls,
+        Self::SmtpServer,
+        Self::SmtpPort,
+        Self::SmtpUsername,
+        Self::SmtpPassword,
+        Self::SmtpStarttls,
     ];
 
     /// Editable fields in password-only mode.
@@ -42,12 +52,12 @@ impl FieldId {
 
     /// Whether this field holds secret content (render masked).
     pub fn is_secret(self) -> bool {
-        matches!(self, Self::Password)
+        matches!(self, Self::Password | Self::SmtpPassword)
     }
 
     /// Whether this field is a boolean toggle rather than text.
     pub fn is_toggle(self) -> bool {
-        matches!(self, Self::Starttls)
+        matches!(self, Self::Starttls | Self::SmtpStarttls)
     }
 }
 
@@ -120,6 +130,11 @@ pub struct SetupModel {
     pub password: String,
     pub email: String,
     pub starttls: bool,
+    pub smtp_server: String,
+    pub smtp_port: String,
+    pub smtp_username: String,
+    pub smtp_password: String,
+    pub smtp_starttls: bool,
     pub active_field: FieldId,
     pub error: Option<String>,
 }
@@ -138,6 +153,11 @@ impl SetupModel {
                 password: String::new(),
                 email: String::new(),
                 starttls: false,
+                smtp_server: String::new(),
+                smtp_port: "587".into(),
+                smtp_username: String::new(),
+                smtp_password: String::new(),
+                smtp_starttls: true,
                 active_field: FieldId::Server,
                 error: None,
             },
@@ -157,6 +177,11 @@ impl SetupModel {
                 password: String::new(),
                 email: String::new(),
                 starttls: *starttls,
+                smtp_server: String::new(),
+                smtp_port: "587".into(),
+                smtp_username: String::new(),
+                smtp_password: String::new(),
+                smtp_starttls: true,
                 active_field: FieldId::Password,
                 error: error.clone(),
             },
@@ -176,6 +201,11 @@ impl SetupModel {
             password: String::new(),
             email: fields.email,
             starttls: fields.starttls,
+            smtp_server: fields.smtp_server,
+            smtp_port: fields.smtp_port,
+            smtp_username: fields.smtp_username,
+            smtp_password: String::new(),
+            smtp_starttls: fields.smtp_starttls,
             active_field: FieldId::Server,
             error: None,
         }
@@ -204,7 +234,13 @@ impl SetupModel {
             FieldId::Username => &self.username,
             FieldId::Password => &self.password,
             FieldId::Email => &self.email,
-            FieldId::Starttls => unreachable!("starttls is a toggle, not text"),
+            FieldId::SmtpServer => &self.smtp_server,
+            FieldId::SmtpPort => &self.smtp_port,
+            FieldId::SmtpUsername => &self.smtp_username,
+            FieldId::SmtpPassword => &self.smtp_password,
+            FieldId::Starttls | FieldId::SmtpStarttls => {
+                unreachable!("toggle fields have no text value")
+            }
         }
     }
 
@@ -220,7 +256,11 @@ impl SetupModel {
             FieldId::Username => Some(&mut self.username),
             FieldId::Password => Some(&mut self.password),
             FieldId::Email => Some(&mut self.email),
-            FieldId::Starttls => None,
+            FieldId::SmtpServer => Some(&mut self.smtp_server),
+            FieldId::SmtpPort => Some(&mut self.smtp_port),
+            FieldId::SmtpUsername => Some(&mut self.smtp_username),
+            FieldId::SmtpPassword => Some(&mut self.smtp_password),
+            FieldId::Starttls | FieldId::SmtpStarttls => None,
         }
     }
 
@@ -230,8 +270,12 @@ impl SetupModel {
             SetupInput::NextField => self.cycle_field(1),
             SetupInput::PrevField => self.cycle_field(-1),
             SetupInput::Toggle => {
-                if self.active_field == FieldId::Starttls && !self.is_readonly(FieldId::Starttls) {
-                    self.starttls = !self.starttls;
+                if self.active_field.is_toggle() && !self.is_readonly(self.active_field) {
+                    match self.active_field {
+                        FieldId::Starttls => self.starttls = !self.starttls,
+                        FieldId::SmtpStarttls => self.smtp_starttls = !self.smtp_starttls,
+                        _ => {}
+                    }
                 }
             }
             SetupInput::SetField(field, value) => {
@@ -243,14 +287,22 @@ impl SetupModel {
                         FieldId::Username => self.username = value,
                         FieldId::Password => self.password = value,
                         FieldId::Email => self.email = value,
-                        FieldId::Starttls => {}
+                        FieldId::SmtpServer => self.smtp_server = value,
+                        FieldId::SmtpPort => self.smtp_port = value,
+                        FieldId::SmtpUsername => self.smtp_username = value,
+                        FieldId::SmtpPassword => self.smtp_password = value,
+                        FieldId::Starttls | FieldId::SmtpStarttls => {}
                     }
                     self.error = None;
                 }
             }
             SetupInput::SetToggle(field, value) => {
-                if field == FieldId::Starttls && !self.is_readonly(field) {
-                    self.starttls = value;
+                if !self.is_readonly(field) {
+                    match field {
+                        FieldId::Starttls => self.starttls = value,
+                        FieldId::SmtpStarttls => self.smtp_starttls = value,
+                        _ => {}
+                    }
                 }
             }
             SetupInput::InsertChar(c) => {
@@ -331,7 +383,7 @@ impl SetupModel {
 
                 let server = self.server.trim().to_string();
                 let username = self.username.trim().to_string();
-                let email = self.email.trim().to_string();
+                let email_addresses = parse_email_list(&self.email);
                 let label = if self.label.trim().is_empty() {
                     username.clone()
                 } else {
@@ -340,6 +392,8 @@ impl SetupModel {
                 let account_id = new_account_id();
 
                 let password_backend = store_password(&username, &server, &self.password);
+                let smtp_pw = store_smtp_password(&account_id, &self.smtp_password);
+                let smtp = self.build_smtp_overrides(smtp_pw);
 
                 let fac = FileAccountConfig {
                     id: account_id,
@@ -349,8 +403,8 @@ impl SetupModel {
                     username,
                     starttls: self.starttls,
                     password: password_backend,
-                    email_addresses: vec![email],
-                    smtp: SmtpOverrides::default(),
+                    email_addresses,
+                    smtp,
                 };
 
                 let mut multi = MultiAccountFileConfig::load()
@@ -385,7 +439,7 @@ impl SetupModel {
 
                 let server = self.server.trim().to_string();
                 let username = self.username.trim().to_string();
-                let email = self.email.trim().to_string();
+                let email_addresses = parse_email_list(&self.email);
                 let label = if self.label.trim().is_empty() {
                     username.clone()
                 } else {
@@ -423,6 +477,14 @@ impl SetupModel {
                     store_password(&username, &server, &self.password)
                 };
 
+                // Preserve existing SMTP password if not re-entered
+                let smtp_pw = if self.smtp_password.is_empty() {
+                    existing.smtp.password.clone()
+                } else {
+                    store_smtp_password(account_id, &self.smtp_password)
+                };
+                let smtp = self.build_smtp_overrides(smtp_pw);
+
                 let fac = FileAccountConfig {
                     id: account_id.clone(),
                     label,
@@ -431,8 +493,8 @@ impl SetupModel {
                     username,
                     starttls: self.starttls,
                     password: password_backend,
-                    email_addresses: vec![email],
-                    smtp: SmtpOverrides::default(),
+                    email_addresses,
+                    smtp,
                 };
 
                 if let Some(pos) = multi.accounts.iter().position(|a| a.id == *account_id) {
@@ -475,11 +537,14 @@ impl SetupModel {
         if self.password.is_empty() {
             return Some("Password is required".into());
         }
-        if self.email.trim().is_empty() {
-            return Some("Email address is required".into());
+        if parse_email_list(&self.email).is_empty() {
+            return Some("At least one email address is required".into());
         }
         if self.port.trim().parse::<u16>().is_err() {
             return Some("Port must be a number (e.g. 993)".into());
+        }
+        if !self.smtp_port.trim().is_empty() && self.smtp_port.trim().parse::<u16>().is_err() {
+            return Some("SMTP port must be a number (e.g. 587)".into());
         }
         None
     }
@@ -492,13 +557,27 @@ impl SetupModel {
         if self.username.trim().is_empty() {
             return Some("Username is required".into());
         }
-        if self.email.trim().is_empty() {
-            return Some("Email address is required".into());
+        if parse_email_list(&self.email).is_empty() {
+            return Some("At least one email address is required".into());
         }
         if self.port.trim().parse::<u16>().is_err() {
             return Some("Port must be a number (e.g. 993)".into());
         }
+        if !self.smtp_port.trim().is_empty() && self.smtp_port.trim().parse::<u16>().is_err() {
+            return Some("SMTP port must be a number (e.g. 587)".into());
+        }
         None
+    }
+
+    /// Build SMTP overrides from the model's SMTP fields.
+    pub fn build_smtp_overrides(&self, password: Option<PasswordBackend>) -> SmtpOverrides {
+        SmtpOverrides {
+            server: non_empty_trimmed(&self.smtp_server),
+            port: self.smtp_port.trim().parse().ok(),
+            username: non_empty_trimmed(&self.smtp_username),
+            password,
+            use_starttls: Some(self.smtp_starttls),
+        }
     }
 }
 
@@ -555,6 +634,10 @@ pub struct SetupFields {
     pub username: String,
     pub email: String,
     pub starttls: bool,
+    pub smtp_server: String,
+    pub smtp_port: String,
+    pub smtp_username: String,
+    pub smtp_starttls: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -576,4 +659,39 @@ pub fn store_password(username: &str, server: &str, password: &str) -> PasswordB
             }
         }
     }
+}
+
+/// Store an SMTP password in the keyring. Returns `None` if the password is empty.
+pub fn store_smtp_password(account_id: &str, password: &str) -> Option<PasswordBackend> {
+    if password.is_empty() {
+        return None;
+    }
+    match keyring::set_smtp_password(account_id, password) {
+        Ok(()) => {
+            log::info!("SMTP password stored in keyring");
+            Some(PasswordBackend::Keyring)
+        }
+        Err(e) => {
+            log::warn!("Failed to store SMTP password in keyring: {}", e);
+            Some(PasswordBackend::Plaintext {
+                value: password.to_string(),
+            })
+        }
+    }
+}
+
+/// Split a comma-separated email string into a list, trimming whitespace
+/// and dropping empty entries.
+fn parse_email_list(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Return `Some(trimmed)` if non-empty, else `None`.
+fn non_empty_trimmed(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() { None } else { Some(t.to_string()) }
 }

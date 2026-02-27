@@ -36,9 +36,7 @@ pub async fn send_email(config: &SmtpConfig, email: &OutgoingEmail) -> Result<()
         return Err("No recipients specified".into());
     }
 
-    let mut builder = Message::builder()
-        .from(from)
-        .subject(&email.subject);
+    let mut builder = Message::builder().from(from).subject(&email.subject);
 
     for addr in to_addrs {
         builder = builder.to(addr);
@@ -59,12 +57,10 @@ pub async fn send_email(config: &SmtpConfig, email: &OutgoingEmail) -> Result<()
         let text_part = SinglePart::plain(email.body.clone());
         let mut multipart = MultiPart::mixed().singlepart(text_part);
         for att in &email.attachments {
-            let content_type: ContentType = att
-                .mime_type
-                .parse()
-                .unwrap_or(ContentType::TEXT_PLAIN);
-            let attachment = Attachment::new(att.filename.clone())
-                .body(att.data.clone(), content_type);
+            let content_type: ContentType =
+                att.mime_type.parse().unwrap_or(ContentType::TEXT_PLAIN);
+            let attachment =
+                Attachment::new(att.filename.clone()).body(att.data.clone(), content_type);
             multipart = multipart.singlepart(attachment);
         }
         builder

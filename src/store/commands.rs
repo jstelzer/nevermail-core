@@ -27,10 +27,12 @@ pub(super) enum CacheCmd {
         reply: oneshot::Sender<Result<Vec<MessageSummary>, String>>,
     },
     LoadBody {
+        account_id: String,
         envelope_hash: u64,
         reply: oneshot::Sender<Result<Option<(String, String, Vec<AttachmentData>)>, String>>,
     },
     SaveBody {
+        account_id: String,
         envelope_hash: u64,
         body_markdown: String,
         body_plain: String,
@@ -39,21 +41,25 @@ pub(super) enum CacheCmd {
     },
     // Phase 2b: dual-truth flag ops
     UpdateFlags {
+        account_id: String,
         envelope_hash: u64,
         flags_local: u8,
         pending_op: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
     ClearPendingOp {
+        account_id: String,
         envelope_hash: u64,
         flags_server: u8,
         reply: oneshot::Sender<Result<(), String>>,
     },
     RevertPendingOp {
+        account_id: String,
         envelope_hash: u64,
         reply: oneshot::Sender<Result<(), String>>,
     },
     RemoveMessage {
+        account_id: String,
         envelope_hash: u64,
         reply: oneshot::Sender<Result<(), String>>,
     },

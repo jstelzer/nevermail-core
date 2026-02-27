@@ -144,10 +144,8 @@ mod tests {
     // inline styles, tracking pixels — the kind of email that
     // produced markdown soup before sanitization.
 
-    const FIXTURE_PLAIN: &str =
-        include_str!("../tests/fixtures/1password_invoice_plain.txt");
-    const FIXTURE_HTML: &str =
-        include_str!("../tests/fixtures/1password_invoice_html.txt");
+    const FIXTURE_PLAIN: &str = include_str!("../tests/fixtures/1password_invoice_plain.txt");
+    const FIXTURE_HTML: &str = include_str!("../tests/fixtures/1password_invoice_html.txt");
 
     #[test]
     fn invoice_plain_text_not_flagged_as_junk() {

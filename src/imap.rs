@@ -5,7 +5,9 @@ use futures::StreamExt;
 use indexmap::IndexMap;
 use tokio::sync::Mutex;
 
-use melib::backends::{BackendEventConsumer, EnvelopeHashBatch, FlagOp, IsSubscribedFn, MailBackend};
+use melib::backends::{
+    BackendEventConsumer, EnvelopeHashBatch, FlagOp, IsSubscribedFn, MailBackend,
+};
 use melib::conf::AccountSettings;
 use melib::email::address::MessageID;
 use melib::email::attachment_types::{ContentType, Text};
@@ -39,12 +41,7 @@ impl ImapSession {
         extra.insert("use_tls".into(), "true".into());
         extra.insert(
             "use_starttls".into(),
-            if config.use_starttls {
-                "true"
-            } else {
-                "false"
-            }
-            .into(),
+            if config.use_starttls { "true" } else { "false" }.into(),
         );
         extra.insert("danger_accept_invalid_certs".into(), "false".into());
 
@@ -152,8 +149,7 @@ impl ImapSession {
         let mut messages = Vec::new();
 
         while let Some(batch_result) = stream.next().await {
-            let envelopes = batch_result
-                .map_err(|e| format!("Error fetching envelopes: {}", e))?;
+            let envelopes = batch_result.map_err(|e| format!("Error fetching envelopes: {}", e))?;
 
             for envelope in envelopes {
                 let from_str = envelope
@@ -217,11 +213,7 @@ impl ImapSession {
         let future = {
             let mut backend = self.backend.lock().await;
             backend
-                .set_flags(
-                    EnvelopeHashBatch::from(envelope_hash),
-                    mailbox_hash,
-                    flags,
-                )
+                .set_flags(EnvelopeHashBatch::from(envelope_hash), mailbox_hash, flags)
                 .map_err(|e| format!("Failed to request set_flags: {}", e))?
         };
 
@@ -273,20 +265,14 @@ impl ImapSession {
             .await
             .map_err(|e| format!("Failed to fetch message bytes: {}", e))?;
 
-        let mail =
-            Mail::new(bytes, None).map_err(|e| format!("Failed to parse message: {}", e))?;
+        let mail = Mail::new(bytes, None).map_err(|e| format!("Failed to parse message: {}", e))?;
 
         let body_attachment = mail.body();
         let (text_plain, text_html, attachments) = extract_body(&body_attachment);
 
-        let plain_rendered = crate::mime::render_body(
-            text_plain.as_deref(),
-            text_html.as_deref(),
-        );
-        let markdown_rendered = crate::mime::render_body_markdown(
-            text_plain.as_deref(),
-            text_html.as_deref(),
-        );
+        let plain_rendered = crate::mime::render_body(text_plain.as_deref(), text_html.as_deref());
+        let markdown_rendered =
+            crate::mime::render_body_markdown(text_plain.as_deref(), text_html.as_deref());
 
         Ok((markdown_rendered, plain_rendered, attachments))
     }

@@ -22,7 +22,8 @@ impl CacheHandle {
     pub fn open() -> Result<Self, String> {
         let db_path = Self::resolve_path()?;
 
-        std::fs::create_dir_all(&db_path).map_err(|e| format!("Failed to create cache dir: {e}"))?;
+        std::fs::create_dir_all(&db_path)
+            .map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
         let db_file = db_path.join("cache.db");
         let conn =
@@ -50,10 +51,18 @@ impl CacheHandle {
 
     // -- async methods -------------------------------------------------------
 
-    pub async fn save_folders(&self, account_id: String, folders: Vec<Folder>) -> Result<(), String> {
+    pub async fn save_folders(
+        &self,
+        account_id: String,
+        folders: Vec<Folder>,
+    ) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(CacheCmd::SaveFolders { account_id, folders, reply })
+            .send(CacheCmd::SaveFolders {
+                account_id,
+                folders,
+                reply,
+            })
             .map_err(|_| "Cache unavailable".to_string())?;
         rx.await.map_err(|_| "Cache unavailable".to_string())?
     }
@@ -106,11 +115,13 @@ impl CacheHandle {
 
     pub async fn load_body(
         &self,
+        account_id: String,
         envelope_hash: u64,
     ) -> Result<Option<(String, String, Vec<AttachmentData>)>, String> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::LoadBody {
+                account_id,
                 envelope_hash,
                 reply,
             })
@@ -120,6 +131,7 @@ impl CacheHandle {
 
     pub async fn save_body(
         &self,
+        account_id: String,
         envelope_hash: u64,
         body_markdown: String,
         body_plain: String,
@@ -128,6 +140,7 @@ impl CacheHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::SaveBody {
+                account_id,
                 envelope_hash,
                 body_markdown,
                 body_plain,
@@ -141,6 +154,7 @@ impl CacheHandle {
     /// Set local flags and mark a pending operation.
     pub async fn update_flags(
         &self,
+        account_id: String,
         envelope_hash: u64,
         flags_local: u8,
         pending_op: String,
@@ -148,6 +162,7 @@ impl CacheHandle {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::UpdateFlags {
+                account_id,
                 envelope_hash,
                 flags_local,
                 pending_op,
@@ -160,12 +175,14 @@ impl CacheHandle {
     /// IMAP op succeeded — update server flags and clear pending.
     pub async fn clear_pending_op(
         &self,
+        account_id: String,
         envelope_hash: u64,
         flags_server: u8,
     ) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::ClearPendingOp {
+                account_id,
                 envelope_hash,
                 flags_server,
                 reply,
@@ -175,10 +192,15 @@ impl CacheHandle {
     }
 
     /// IMAP op failed — revert local flags to server flags, clear pending.
-    pub async fn revert_pending_op(&self, envelope_hash: u64) -> Result<(), String> {
+    pub async fn revert_pending_op(
+        &self,
+        account_id: String,
+        envelope_hash: u64,
+    ) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::RevertPendingOp {
+                account_id,
                 envelope_hash,
                 reply,
             })
@@ -187,10 +209,15 @@ impl CacheHandle {
     }
 
     /// Remove a message from the cache (after successful move).
-    pub async fn remove_message(&self, envelope_hash: u64) -> Result<(), String> {
+    pub async fn remove_message(
+        &self,
+        account_id: String,
+        envelope_hash: u64,
+    ) -> Result<(), String> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(CacheCmd::RemoveMessage {
+                account_id,
                 envelope_hash,
                 reply,
             })
@@ -222,7 +249,11 @@ impl CacheHandle {
 fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
-            CacheCmd::SaveFolders { account_id, folders, reply } => {
+            CacheCmd::SaveFolders {
+                account_id,
+                folders,
+                reply,
+            } => {
                 let _ = reply.send(queries::do_save_folders(&conn, &account_id, &folders));
             }
             CacheCmd::LoadFolders { account_id, reply } => {
@@ -234,7 +265,12 @@ fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
                 messages,
                 reply,
             } => {
-                let _ = reply.send(queries::do_save_messages(&conn, &account_id, mailbox_hash, &messages));
+                let _ = reply.send(queries::do_save_messages(
+                    &conn,
+                    &account_id,
+                    mailbox_hash,
+                    &messages,
+                ));
             }
             CacheCmd::LoadMessages {
                 account_id,
@@ -243,16 +279,23 @@ fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
                 offset,
                 reply,
             } => {
-                let _ =
-                    reply.send(queries::do_load_messages(&conn, &account_id, mailbox_hash, limit, offset));
+                let _ = reply.send(queries::do_load_messages(
+                    &conn,
+                    &account_id,
+                    mailbox_hash,
+                    limit,
+                    offset,
+                ));
             }
             CacheCmd::LoadBody {
+                account_id,
                 envelope_hash,
                 reply,
             } => {
-                let _ = reply.send(queries::do_load_body(&conn, envelope_hash));
+                let _ = reply.send(queries::do_load_body(&conn, &account_id, envelope_hash));
             }
             CacheCmd::SaveBody {
+                account_id,
                 envelope_hash,
                 body_markdown,
                 body_plain,
@@ -261,6 +304,7 @@ fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
             } => {
                 let _ = reply.send(queries::do_save_body(
                     &conn,
+                    &account_id,
                     envelope_hash,
                     &body_markdown,
                     &body_plain,
@@ -268,6 +312,7 @@ fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
                 ));
             }
             CacheCmd::UpdateFlags {
+                account_id,
                 envelope_hash,
                 flags_local,
                 pending_op,
@@ -275,30 +320,46 @@ fn run_loop(conn: Connection, mut rx: mpsc::UnboundedReceiver<CacheCmd>) {
             } => {
                 let _ = reply.send(queries::do_update_flags(
                     &conn,
+                    &account_id,
                     envelope_hash,
                     flags_local,
                     &pending_op,
                 ));
             }
             CacheCmd::ClearPendingOp {
+                account_id,
                 envelope_hash,
                 flags_server,
                 reply,
             } => {
-                let _ =
-                    reply.send(queries::do_clear_pending_op(&conn, envelope_hash, flags_server));
+                let _ = reply.send(queries::do_clear_pending_op(
+                    &conn,
+                    &account_id,
+                    envelope_hash,
+                    flags_server,
+                ));
             }
             CacheCmd::RevertPendingOp {
+                account_id,
                 envelope_hash,
                 reply,
             } => {
-                let _ = reply.send(queries::do_revert_pending_op(&conn, envelope_hash));
+                let _ = reply.send(queries::do_revert_pending_op(
+                    &conn,
+                    &account_id,
+                    envelope_hash,
+                ));
             }
             CacheCmd::RemoveMessage {
+                account_id,
                 envelope_hash,
                 reply,
             } => {
-                let _ = reply.send(queries::do_remove_message(&conn, envelope_hash));
+                let _ = reply.send(queries::do_remove_message(
+                    &conn,
+                    &account_id,
+                    envelope_hash,
+                ));
             }
             CacheCmd::Search { query, reply } => {
                 let _ = reply.send(queries::do_search(&conn, &query));

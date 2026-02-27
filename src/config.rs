@@ -185,13 +185,7 @@ pub struct AccountConfig {
 impl AccountConfig {
     /// Build an AccountConfig from a FileAccountConfig + resolved password.
     pub fn from_file_account(fac: &FileAccountConfig, password: String) -> Self {
-        let smtp = SmtpConfig::resolve(
-            &fac.server,
-            &fac.username,
-            &password,
-            &fac.smtp,
-            &fac.id,
-        );
+        let smtp = SmtpConfig::resolve(&fac.server, &fac.username, &password, &fac.smtp, &fac.id);
         AccountConfig {
             id: fac.id.clone(),
             label: fac.label.clone(),
@@ -377,7 +371,12 @@ impl Config {
             .unwrap_or(false);
         let email_addresses = std::env::var("NEVERLIGHT_MAIL_FROM")
             .ok()
-            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
 
         Some(Config {
@@ -473,4 +472,3 @@ fn resolve_password(
         PasswordBackend::Keyring => keyring::get_password(username, server),
     }
 }
-

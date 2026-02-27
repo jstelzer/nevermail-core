@@ -41,10 +41,6 @@ pub struct AttachmentData {
 
 impl AttachmentData {
     pub fn is_image(&self) -> bool {
-        self.mime_type
-            .to_ascii_lowercase()
-            .starts_with("image/")
+        self.mime_type.to_ascii_lowercase().starts_with("image/")
     }
 }
-
-

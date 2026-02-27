@@ -5,8 +5,8 @@
 //! live here so bugs are fixed once.
 
 use crate::config::{
-    AccountId, ConfigNeedsInput, FileAccountConfig, MultiAccountFileConfig, PasswordBackend,
-    SmtpOverrides, new_account_id,
+    new_account_id, AccountId, ConfigNeedsInput, FileAccountConfig, MultiAccountFileConfig,
+    PasswordBackend, SmtpOverrides,
 };
 use crate::keyring;
 
@@ -407,12 +407,11 @@ impl SetupModel {
                     smtp,
                 };
 
-                let mut multi = MultiAccountFileConfig::load()
-                    .ok()
-                    .flatten()
-                    .unwrap_or(MultiAccountFileConfig {
+                let mut multi = MultiAccountFileConfig::load().ok().flatten().unwrap_or(
+                    MultiAccountFileConfig {
                         accounts: Vec::new(),
-                    });
+                    },
+                );
                 if multi
                     .accounts
                     .iter()
@@ -446,12 +445,11 @@ impl SetupModel {
                     self.label.trim().to_string()
                 };
 
-                let mut multi = MultiAccountFileConfig::load()
-                    .ok()
-                    .flatten()
-                    .unwrap_or(MultiAccountFileConfig {
+                let mut multi = MultiAccountFileConfig::load().ok().flatten().unwrap_or(
+                    MultiAccountFileConfig {
                         accounts: Vec::new(),
-                    });
+                    },
+                );
 
                 let existing = match multi.accounts.iter().find(|a| a.id == *account_id) {
                     Some(a) => a,
@@ -463,11 +461,9 @@ impl SetupModel {
 
                 // If server/username changed, keyring lookup key changes —
                 // require password so we can store it under the new key
-                let creds_changed =
-                    existing.server != server || existing.username != username;
+                let creds_changed = existing.server != server || existing.username != username;
                 if creds_changed && self.password.is_empty() {
-                    self.error =
-                        Some("Password required when changing server or username".into());
+                    self.error = Some("Password required when changing server or username".into());
                     return SetupTransition::Continue;
                 }
 
@@ -693,5 +689,9 @@ fn parse_email_list(input: &str) -> Vec<String> {
 /// Return `Some(trimmed)` if non-empty, else `None`.
 fn non_empty_trimmed(s: &str) -> Option<String> {
     let t = s.trim();
-    if t.is_empty() { None } else { Some(t.to_string()) }
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
 }

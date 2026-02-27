@@ -308,8 +308,12 @@ impl SetupModel {
                         return SetupTransition::Continue;
                     }
                 };
-                if let Some(acct) = multi.accounts.iter_mut().find(|a| a.id == *account_id) {
-                    acct.password = password_backend;
+                match multi.accounts.iter_mut().find(|a| a.id == *account_id) {
+                    Some(acct) => acct.password = password_backend,
+                    None => {
+                        self.error = Some("Account not found in config".into());
+                        return SetupTransition::Continue;
+                    }
                 }
                 if let Err(e) = multi.save() {
                     self.error = Some(format!("Failed to save config: {e}"));
@@ -364,7 +368,8 @@ impl SetupModel {
             }
 
             SetupRequest::Edit { account_id } => {
-                if let Some(err) = self.validate_full() {
+                // Edit doesn't require password — empty means keep existing
+                if let Some(err) = self.validate_edit() {
                     self.error = Some(err);
                     return SetupTransition::Continue;
                 }
@@ -379,7 +384,25 @@ impl SetupModel {
                     self.label.trim().to_string()
                 };
 
-                let password_backend = store_password(&username, &server, &self.password);
+                let mut multi = MultiAccountFileConfig::load()
+                    .ok()
+                    .flatten()
+                    .unwrap_or(MultiAccountFileConfig {
+                        accounts: Vec::new(),
+                    });
+
+                // Only update password backend if operator entered a new one
+                let password_backend = if self.password.is_empty() {
+                    // Keep existing backend from config
+                    multi
+                        .accounts
+                        .iter()
+                        .find(|a| a.id == *account_id)
+                        .map(|a| a.password.clone())
+                        .unwrap_or(PasswordBackend::Keyring)
+                } else {
+                    store_password(&username, &server, &self.password)
+                };
 
                 let fac = FileAccountConfig {
                     id: account_id.clone(),
@@ -393,12 +416,6 @@ impl SetupModel {
                     smtp: SmtpOverrides::default(),
                 };
 
-                let mut multi = MultiAccountFileConfig::load()
-                    .ok()
-                    .flatten()
-                    .unwrap_or(MultiAccountFileConfig {
-                        accounts: Vec::new(),
-                    });
                 if let Some(pos) = multi.accounts.iter().position(|a| a.id == *account_id) {
                     multi.accounts[pos] = fac;
                 } else {
@@ -424,7 +441,8 @@ impl SetupModel {
                 }
                 None
             }
-            SetupRequest::Full | SetupRequest::Edit { .. } => self.validate_full(),
+            SetupRequest::Full => self.validate_full(),
+            SetupRequest::Edit { .. } => self.validate_edit(),
         }
     }
 
@@ -437,6 +455,23 @@ impl SetupModel {
         }
         if self.password.is_empty() {
             return Some("Password is required".into());
+        }
+        if self.email.trim().is_empty() {
+            return Some("Email address is required".into());
+        }
+        if self.port.trim().parse::<u16>().is_err() {
+            return Some("Port must be a number (e.g. 993)".into());
+        }
+        None
+    }
+
+    /// Edit validation: same as full but password is optional (empty = keep existing).
+    fn validate_edit(&self) -> Option<String> {
+        if self.server.trim().is_empty() {
+            return Some("Server is required".into());
+        }
+        if self.username.trim().is_empty() {
+            return Some("Username is required".into());
         }
         if self.email.trim().is_empty() {
             return Some("Email address is required".into());

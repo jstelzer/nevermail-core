@@ -24,6 +24,11 @@ pub struct ImapSession {
     mailbox_paths: Mutex<HashMap<MailboxHash, String>>,
 }
 
+fn map_mailbox_counts(counts: (usize, usize)) -> (u32, u32) {
+    let (unseen, total) = counts;
+    (unseen as u32, total as u32)
+}
+
 impl std::fmt::Debug for ImapSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImapSession").finish_non_exhaustive()
@@ -102,17 +107,18 @@ impl ImapSession {
         let mut path_map = HashMap::new();
 
         for (hash, mailbox) in &mailboxes {
-            let (total, unseen) = mailbox
+            let counts = mailbox
                 .count()
                 .map_err(|e| format!("Failed to get mailbox count: {}", e))?;
+            let (unseen, total) = map_mailbox_counts(counts);
 
             path_map.insert(*hash, mailbox.path().to_string());
 
             folders.push(Folder {
                 name: mailbox.name().to_string(),
                 path: mailbox.path().to_string(),
-                unread_count: unseen as u32,
-                total_count: total as u32,
+                unread_count: unseen,
+                total_count: total,
                 mailbox_hash: hash.0,
             });
         }
@@ -292,6 +298,18 @@ impl ImapSession {
                 .map_err(|e| format!("Failed to start watch: {}", e))?
         };
         Ok(stream)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_mailbox_counts;
+
+    #[test]
+    fn mailbox_count_tuple_maps_to_unread_then_total() {
+        let (unread, total) = map_mailbox_counts((3, 10));
+        assert_eq!(unread, 3);
+        assert_eq!(total, 10);
     }
 }
 

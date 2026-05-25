@@ -1,3 +1,5 @@
+use keyring_core as keyring;
+
 const SERVICE: &str = "neverlight-mail";
 
 fn key_id(username: &str, server: &str) -> String {

@@ -29,7 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Credential storage
-keyring = { version = "3", features = ["sync-secret-service", "apple-native"] }
+keyring-core = "1.0.0"
 
 # XDG directory resolution
 dirs = "6"

@@ -51,6 +51,10 @@ pub struct FileAccountConfig {
     /// JMAP session URL (e.g. "https://api.fastmail.com/jmap/session").
     pub jmap_url: String,
     pub username: String,
+    /// Configuration is owned by an external declarative manager and must not
+    /// be rewritten by the application.
+    #[serde(default)]
+    pub managed: bool,
     /// How auth credentials are stored.
     /// Uses `auth` for new OAuth-aware format, falls back to `auth_token` for legacy.
     #[serde(alias = "auth_token")]
@@ -82,6 +86,9 @@ pub enum AuthBackend {
         client_id: String,
         resource: String,
         token_endpoint: String,
+        /// Exact callback URI for pre-registered native clients.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        redirect_uri: Option<String>,
         /// Plaintext fallback for refresh token (when keyring unavailable).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         refresh_token_plaintext: Option<String>,
@@ -114,6 +121,7 @@ pub enum AuthMethod {
         issuer: String,
         client_id: String,
         token_endpoint: String,
+        redirect_uri: Option<String>,
         refresh_token: String,
         /// Cached access token (short-lived, may be expired).
         access_token: Option<String>,
@@ -129,6 +137,8 @@ pub struct AccountConfig {
     /// JMAP session URL.
     pub jmap_url: String,
     pub username: String,
+    /// Whether the on-disk account definition is externally managed.
+    pub managed: bool,
     /// Resolved auth credentials.
     pub auth: AuthMethod,
     pub email_addresses: Vec<String>,
@@ -154,6 +164,7 @@ impl AccountConfig {
             label: fac.label.clone(),
             jmap_url: fac.jmap_url.clone(),
             username: fac.username.clone(),
+            managed: fac.managed,
             auth: AuthMethod::AppPassword { token },
             email_addresses: fac.email_addresses.clone(),
             capabilities: fac.capabilities.clone(),
@@ -167,6 +178,7 @@ impl AccountConfig {
         issuer: String,
         client_id: String,
         token_endpoint: String,
+        redirect_uri: Option<String>,
         refresh_token: String,
         resource: String,
     ) -> Self {
@@ -175,10 +187,12 @@ impl AccountConfig {
             label: fac.label.clone(),
             jmap_url: fac.jmap_url.clone(),
             username: fac.username.clone(),
+            managed: fac.managed,
             auth: AuthMethod::OAuth {
                 issuer,
                 client_id,
                 token_endpoint,
+                redirect_uri,
                 refresh_token,
                 access_token: None,
                 resource,
@@ -214,6 +228,7 @@ pub enum ConfigNeedsInput {
         label: String,
         jmap_url: String,
         username: String,
+        client_id: String,
         error: String,
     },
 }
@@ -226,6 +241,7 @@ pub struct AccountResolutionError {
     pub jmap_url: String,
     pub username: String,
     pub auth_backend: String,
+    pub oauth_client_id: Option<String>,
     pub error: String,
 }
 
@@ -320,6 +336,9 @@ impl MultiAccountFileConfig {
     }
 
     pub fn save(&self) -> Result<(), String> {
+        if self.accounts.iter().any(|account| account.managed) {
+            return Err("config contains declaratively managed accounts".into());
+        }
         let path = config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
@@ -355,6 +374,7 @@ pub fn resolve_all_accounts() -> Result<Vec<AccountConfig>, ConfigNeedsInput> {
                 label: f.label.clone(),
                 jmap_url: f.jmap_url.clone(),
                 username: f.username.clone(),
+                client_id: f.oauth_client_id.clone().unwrap_or_default(),
                 error: f.error.clone(),
             });
         }
@@ -403,6 +423,7 @@ pub fn resolve_all_accounts_detailed() -> AccountResolution {
                             jmap_url: fac.jmap_url.clone(),
                             username: fac.username.clone(),
                             auth_backend: auth_backend_name(&fac.auth),
+                            oauth_client_id: oauth_client_id(&fac.auth),
                             error: e,
                         });
                     }
@@ -439,6 +460,7 @@ fn account_from_env() -> Option<AccountConfig> {
         label: username.clone(),
         jmap_url,
         username,
+        managed: false,
         auth: AuthMethod::AppPassword { token },
         email_addresses: Vec::new(),
         capabilities: AccountCapabilities::default(),
@@ -455,6 +477,13 @@ fn auth_backend_name(backend: &AuthBackend) -> String {
         AuthBackend::Keyring => "keyring".into(),
         AuthBackend::Plaintext { .. } => "plaintext".into(),
         AuthBackend::OAuth { .. } => "oauth".into(),
+    }
+}
+
+fn oauth_client_id(backend: &AuthBackend) -> Option<String> {
+    match backend {
+        AuthBackend::OAuth { client_id, .. } => Some(client_id.clone()),
+        _ => None,
     }
 }
 
@@ -484,19 +513,29 @@ fn resolve_account(fac: &FileAccountConfig) -> Result<AccountConfig, String> {
             client_id,
             resource,
             token_endpoint,
+            redirect_uri,
             refresh_token_plaintext,
         } => {
-            // Try keyring first, fall back to plaintext
-            let refresh_token = keyring::get_oauth_refresh(&fac.id).or_else(|_| {
-                refresh_token_plaintext
+            // Declaratively managed OAuth accounts deliberately have no
+            // plaintext fallback: the refresh token exists only in the OS
+            // keyring. Legacy unmanaged configs retain the old fallback.
+            let refresh_token = match keyring::get_oauth_refresh(&fac.id) {
+                Ok(token) => token,
+                Err(error) if fac.managed => {
+                    return Err(format!(
+                        "OAuth refresh token is not in the keyring: {error}"
+                    ));
+                }
+                Err(_) => refresh_token_plaintext
                     .clone()
-                    .ok_or_else(|| "No refresh token in keyring or config".to_string())
-            })?;
+                    .ok_or_else(|| "No refresh token in keyring or config".to_string())?,
+            };
             Ok(AccountConfig::from_file_account_oauth(
                 fac,
                 issuer.clone(),
                 client_id.clone(),
                 token_endpoint.clone(),
+                redirect_uri.clone(),
                 refresh_token,
                 resource.clone(),
             ))
@@ -550,6 +589,7 @@ mod tests {
             client_id: "client-123".into(),
             resource: "https://api.fastmail.com/jmap/session".into(),
             token_endpoint: "https://auth.fastmail.com/token".into(),
+            redirect_uri: None,
             refresh_token_plaintext: None,
         };
         let json = serde_json::to_string(&backend).unwrap();

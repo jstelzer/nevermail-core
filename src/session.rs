@@ -79,6 +79,11 @@ impl JmapSession {
                 // Persist new refresh token (servers use ratcheting — old token is invalidated)
                 if let Some(ref new_refresh) = token_set.refresh_token {
                     if let Err(e) = crate::keyring::set_oauth_refresh(&config.id, new_refresh) {
+                        if config.managed {
+                            return Err(format!(
+                                "cannot persist refreshed OAuth token for managed account: {e}"
+                            ));
+                        }
                         log::warn!("Failed to persist refreshed OAuth token to keyring: {e}");
                         // Also update plaintext fallback in config file
                         if let Ok(Some(mut multi)) = crate::config::MultiAccountFileConfig::load() {
@@ -117,7 +122,7 @@ impl JmapSession {
         let stale_submission =
             config.capabilities.supports_submission != session.supports_submission;
 
-        if stale_push || stale_submission {
+        if (stale_push || stale_submission) && !config.managed {
             log::info!(
                 "Healing capabilities for account {}: push {}→{}, submission {}→{}",
                 config.id,

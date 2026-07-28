@@ -48,14 +48,52 @@ pub fn build_event_source_url(template: &str, config: &EventSourceConfig) -> Str
 
     if template.contains("{types}") {
         // Template-style URL — substitute placeholders
-        template
+        let url = template
             .replace("{types}", &types_str)
             .replace("{closeafter}", &close_after_str)
-            .replace("{ping}", &ping_str)
+            .replace("{ping}", &ping_str);
+
+        // A zero closeafter value is not accepted by Stalwart. RFC 8620 treats this
+        // optional parameter as an omitted/default value, so remove it when
+        // the caller requests the default instead of sending an invalid zero.
+        if config.close_after == 0 {
+            remove_query_parameter(&url, "closeafter")
+        } else {
+            url
+        }
     } else {
-        // Bare URL — append query parameters
+        // Bare URL — append query parameters. Optional zero values are
+        // omitted for servers that reject an explicit zero closeafter value.
+        let mut params = vec![format!("types={types_str}")];
+        if config.close_after > 0 {
+            params.push(format!("closeafter={close_after_str}"));
+        }
+        if config.ping > 0 {
+            params.push(format!("ping={ping_str}"));
+        }
         let sep = if template.contains('?') { "&" } else { "?" };
-        format!("{template}{sep}types={types_str}&closeafter={close_after_str}&ping={ping_str}")
+        format!("{template}{sep}{}", params.join("&"))
+    }
+}
+
+fn remove_query_parameter(url: &str, name: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+
+    let query = query
+        .split('&')
+        .filter(|parameter| {
+            parameter
+                .split_once('=')
+                .is_none_or(|(parameter_name, _)| parameter_name != name)
+        })
+        .collect::<Vec<_>>();
+
+    if query.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", query.join("&"))
     }
 }
 
@@ -241,7 +279,14 @@ mod tests {
         let config = EventSourceConfig::default();
         let url = build_event_source_url(template, &config);
         assert!(url.contains("types=Email,Mailbox"));
-        assert!(url.contains("closeafter=0"));
+        assert!(!url.contains("closeafter="));
+    }
+
+    #[test]
+    fn omits_zero_optional_parameters_for_bare_url() {
+        let url =
+            build_event_source_url("https://example.com/event/", &EventSourceConfig::default());
+        assert_eq!(url, "https://example.com/event/?types=Email,Mailbox");
     }
 
     #[test]
